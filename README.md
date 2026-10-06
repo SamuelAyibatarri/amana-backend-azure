@@ -177,4 +177,4 @@ Ledger stands on mirror failure — recorded as mirror-gap in logs, repaired by 
 
 Bun · Hono · Baileys · Gemini (`@google/genai`, Zod) · Solana Kit + SPL Token Program · satori + resvg + qrcode · Paystack (via frontend) · Better Auth + D1 (frontend ledger)
 
-Related: [`../amana-frontend`](../amana-frontend) — Next.js + Cloudflare Workers, D1 ledger, Paystack webhooks, KYC + PIN + dashboard.
+Related: [`amana-frontend`](https://github.com/SamuelAyibatarri/amana-frontend) — Next.js + Cloudflare Workers, D1 ledger, Paystack webhooks, KYC + PIN + dashboard.
