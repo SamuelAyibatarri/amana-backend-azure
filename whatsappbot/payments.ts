@@ -169,3 +169,27 @@ export function parsePin(text: string): string | null {
   const t = text.trim();
   return PIN.test(t) ? t : null;
 }
+
+/**
+ * Fixed replies for model-classified social moments. The model decides
+ * *that* it's thanks/an ack; it never words the reply. Pure + tested.
+ */
+export function socialReplyText(kind: string): string {
+  if (kind === "thanks") return "*Anytime. 🤝*";
+  return "*Noted.*";
+}
+
+/**
+ * Recipient invite after a phone credit. Verified recipients are never
+ * nagged about KYC — the nag (with link) is for the unverified only.
+ * Pure + tested.
+ */
+export function inviteText(
+  senderLocal: string,
+  amountLabel: string,
+  verified: boolean,
+  kycUrl: string,
+): string {
+  const head = `*${senderLocal} sent you ${amountLabel} on Amana.*\n\nIt's in your account already.`;
+  return verified ? head : `${head} Verify your identity and set a PIN to withdraw:\n${kycUrl}`;
+}

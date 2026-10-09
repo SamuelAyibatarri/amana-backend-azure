@@ -14,7 +14,7 @@ import { log } from "../lib/log.ts";
  */
 
 export const intentSchema = z.object({
-  intent: z.enum(["onboarding", "buy", "send", "balance", "history", "request", "unknown"]),
+  intent: z.enum(["onboarding", "buy", "send", "balance", "history", "request", "social", "unknown"]),
   amount: z.number().positive().optional(),
   targetPhoneNumber: z.string().optional(),
   targetAddress: z.string().optional(),
@@ -25,6 +25,13 @@ export const intentSchema = z.object({
   buyAmountUnit: z.enum(["NGN", "SOL", "USDC"]).optional(),
   /** Unit of a send amount: "send 5000 naira worth of USDC" = NGN. */
   amountUnit: z.enum(["NGN", "SOL", "USDC"]).optional(),
+  /**
+   * Social flavor, set only when intent is "social" (model-classified
+   * conversation: thanks, greetings, acks). Never inferred by regex —
+   * the model owns all phatic language; deterministic parsers own
+   * transaction controls only (yes/no, PIN, ACCEPT/REJECT, amounts).
+   */
+  socialKind: z.enum(["thanks", "greeting", "ack", "other"]).optional(),
 });
 
 export type Intent = z.infer<typeof intentSchema>;
@@ -35,7 +42,7 @@ const intentJsonSchema = {
   properties: {
     intent: {
       type: "string",
-      enum: ["onboarding", "buy", "send", "balance", "history", "request", "unknown"],
+      enum: ["onboarding", "buy", "send", "balance", "history", "request", "social", "unknown"],
     },
     amount: { type: "number" },
     targetPhoneNumber: { type: "string" },
@@ -44,6 +51,7 @@ const intentJsonSchema = {
     buyAsset: { type: "string", enum: ["SOL", "USDC"] },
     buyAmountUnit: { type: "string", enum: ["NGN", "SOL", "USDC"] },
     amountUnit: { type: "string", enum: ["NGN", "SOL", "USDC"] },
+    socialKind: { type: "string", enum: ["thanks", "greeting", "ack", "other"] },
   },
   required: ["intent"],
 } as const;
@@ -194,6 +202,16 @@ export function sanitizeIntent(raw: Intent): Intent {
       ? raw.amountUnit
       : undefined;
   if (amountUnit !== undefined) clean.amountUnit = amountUnit;
+  // Social flavor passes through verbatim (closed enum, model-set).
+  // Fallback never sets it — without the model there is no social read.
+  const socialKind =
+    raw.socialKind === "thanks" ||
+    raw.socialKind === "greeting" ||
+    raw.socialKind === "ack" ||
+    raw.socialKind === "other"
+      ? raw.socialKind
+      : undefined;
+  if (socialKind !== undefined) clean.socialKind = socialKind;
   return clean;
 }
 
@@ -302,7 +320,7 @@ export async function parseIntent(
         model: MODEL,
         contents:
           `Classify this WhatsApp wallet message. Reply with JSON only: ${text}.` +
-          ` Fields: intent is one of onboarding/buy/send/balance/history/request/unknown. amount is a positive number written in digits ("two kay" is 2000). targetPhoneNumber is digits only — resolve names/pronouns ("him", "mum", "that number") against the recent chat when a number appeared there, else omit. targetAddress is a Solana base58 address (32-44 chars) when the recipient is an address, not a phone. currency is SOL, USDC, or NGN when the message names one. buyAsset is SOL or USDC when a buy names its crypto ("buy 2000 naira of sol" → buyAsset SOL). buyAmountUnit is the unit of a buy amount: SOL in "buy 1 SOL" (crypto-denominated), NGN in "buy 2000 naira" (default NGN when unclear). amountUnit is the unit of a SEND amount when fiat and crypto are both named: "send 5000 naira worth of USDC to 0803..." → amount 5000, amountUnit NGN, currency USDC. "send 0.5 SOL" → amountUnit SOL. Default amountUnit to the currency itself when only crypto is named. request is asking someone for money ("request 5000 from 0803", "ask mum for 5 usdc"): targetPhoneNumber is the person ASKED, amountUnit follows the same fiat rule as sends. Corrections ("I meant...", "no, ...", "actually...") inherit the ACTION of the most recent actionable message in history unless a new action verb (buy/send/balance/history/request) appears — "I meant 5000 naira worth of USDC" after a send is a SEND, never a buy.${context}`,
+          ` Fields: intent is one of onboarding/buy/send/balance/history/request/social/unknown. amount is a positive number written in digits ("two kay" is 2000). targetPhoneNumber is digits only — resolve names/pronouns ("him", "mum", "that number") against the recent chat when a number appeared there, else omit. targetAddress is a Solana base58 address (32-44 chars) when the recipient is an address, not a phone. currency is SOL, USDC, or NGN when the message names one. buyAsset is SOL or USDC when a buy names its crypto ("buy 2000 naira of sol" → buyAsset SOL). buyAmountUnit is the unit of a buy amount: SOL in "buy 1 SOL" (crypto-denominated), NGN in "buy 2000 naira" (default NGN when unclear). amountUnit is the unit of a SEND amount when fiat and crypto are both named: "send 5000 naira worth of USDC to 0803..." → amount 5000, amountUnit NGN, currency USDC. "send 0.5 SOL" → amountUnit SOL. Default amountUnit to the currency itself when only crypto is named. request is asking someone for money ("request 5000 from 0803", "ask mum for 5 usdc"): targetPhoneNumber is the person ASKED, amountUnit follows the same fiat rule as sends. social is pure conversation with NO transaction content, and it outranks every other non-transactional read — when in doubt between social and unknown, choose social, never unknown: thanks and gratitude in any form ("thanks", "thank youuuu sir", "okay thanks i guess", "thx boss") → social/thanks; greetings and smalltalk ("hey", "hey hey", "good morning", "how far") → social/greeting; bare acks ("ok", "lol", "alright", "noted") → social/ack. Examples (reply with the same JSON shape): "Okay, thanks I guess" → {"intent": "social", "socialKind": "thanks"}. "Thank youuuu sir" → {"intent": "social", "socialKind": "thanks"}. "Hey hey" → {"intent": "social", "socialKind": "greeting"}. "lol ok" → {"intent": "social", "socialKind": "ack"}. "send 5 sol to 08031234567" → {"intent": "send", "amount": 5, "targetPhoneNumber": "08031234567", "currency": "SOL", "amountUnit": "SOL"}. A message that is ONLY a greeting ("hey", "hey hey", "hello", "good morning") is social/greeting, NOT onboarding (onboarding is for setup words: start, register, join). A message that ALSO moves money is never social — "thanks, now send 5 sol" is send. Corrections inherit ACTION per the rule above. Corrections ("I meant...", "no, ...", "actually...") inherit the ACTION of the most recent actionable message in history unless a new action verb (buy/send/balance/history/request) appears — "I meant 5000 naira worth of USDC" after a send is a SEND, never a buy.${context}`,
         config: {
           responseMimeType: "application/json",
           responseSchema: intentJsonSchema,

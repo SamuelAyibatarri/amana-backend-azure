@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test";
 import {
   buildConfirmMessage,
   buildYesNoReprompt,
+  inviteText,
   displayTarget,
   isActionable,
   isThanks,
   parsePin,
   parseYesNo,
   shortAddress,
+  socialReplyText,
 } from "./payments.ts";
 import type { PaymentDetails } from "./payments.ts";
 
@@ -198,5 +200,29 @@ describe("isThanks", () => {
     expect(isThanks("what do you think")).toBe(false);
     expect(isThanks("")).toBe(false);
     expect(isThanks("thank")).toBe(false);
+  });
+});
+
+describe("socialReplyText", () => {
+  test("thanks gets the handshake, everything else is brief", () => {
+    expect(socialReplyText("thanks")).toBe("*Anytime. 🤝*");
+    expect(socialReplyText("ack")).toBe("*Noted.*");
+    expect(socialReplyText("other")).toBe("*Noted.*");
+    expect(socialReplyText("greeting")).toBe("*Noted.*");
+  });
+});
+
+describe("inviteText", () => {
+  test("verified recipients are never nagged", () => {
+    const msg = inviteText("09067866448", "5 USDC", true, "https://kyc");
+    expect(msg).toContain("It's in your account already.");
+    expect(msg).not.toContain("Verify your identity");
+    expect(msg).not.toContain("https://kyc");
+  });
+  test("unverified recipients get the nag + link", () => {
+    const msg = inviteText("09067866448", "5 USDC", false, "https://kyc");
+    expect(msg).toContain("It's in your account already.");
+    expect(msg).toContain("Verify your identity and set a PIN to withdraw");
+    expect(msg).toContain("https://kyc");
   });
 });

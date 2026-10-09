@@ -146,6 +146,21 @@ describe("sanitizeIntent", () => {
         .amountUnit,
     ).toBeUndefined();
   });
+  test("socialKind passes through verbatim, junk dropped", () => {
+    expect(
+      sanitizeIntent({ intent: "social", socialKind: "thanks" }).socialKind,
+    ).toBe("thanks");
+    expect(
+      sanitizeIntent({ intent: "social", socialKind: "greeting" }).socialKind,
+    ).toBe("greeting");
+    expect(
+      sanitizeIntent({ intent: "social", socialKind: "zzz" } as unknown as Intent)
+        .socialKind,
+    ).toBeUndefined();
+    expect(
+      sanitizeIntent({ intent: "send" }).socialKind,
+    ).toBeUndefined();
+  });
 });
 
 describe("fallbackIntent", () => {

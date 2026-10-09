@@ -52,10 +52,12 @@ import {
   PIN_REPROMPT,
   buildConfirmMessage,
   buildYesNoReprompt,
+  inviteText,
   isActionable,
   isThanks,
   parsePin,
   parseYesNo,
+  socialReplyText,
   type PaymentDetails,
 } from "./payments.ts";
 import { log } from "../lib/log.ts";
@@ -514,12 +516,17 @@ export async function handleMessage(msg: IncomingMessage): Promise<void> {
         await finalizeRequestAccept(pending.details.requestId, msg.from);
       }
       // Invite the recipient (one per transfer — the credit is idempotent
-      // per approval, so no spam loop).
+      // per approval, so no spam loop). Verified recipients are never
+      // nagged about KYC — the nag is for the unverified only.
+      const inviteClearance = await getClearance(pending.details.targetPhoneNumber);
       void replyText(
         pending.details.targetPhoneNumber,
-        `*${displayPhone(msg.from)} sent you ${formatAmount(pending.details.amount ?? 0, pending.details.currency)} on Amana.*\n\n` +
-          `It's in your account already. Verify your identity and set a PIN to withdraw:\n` +
+        inviteText(
+          displayPhone(msg.from),
+          formatAmount(pending.details.amount ?? 0, pending.details.currency),
+          inviteClearance.verified,
           kycUrl(),
+        ),
       );
       recordTurn(msg.from, {
         intent: pending.details.action,
@@ -853,11 +860,8 @@ export async function handleMessage(msg: IncomingMessage): Promise<void> {
     return;
   }
 
-  if (isThanks(msg.text)) {
-    recordTurn(msg.from, { intent: "thanks", outcome: "acknowledged" });
-    await replyText(msg.from, "*Anytime. 🤝*");
-    return;
-  }
+  // (Thanks/greetings are model-classified as the `social` intent —
+  // isThanks survives only as the no-model fallback in `unknown` below.)
 
   if (ACCOUNT_QUESTION.test(msg.text)) {
     const clearance = await getClearance(msg.from);
@@ -1426,8 +1430,40 @@ export async function handleMessage(msg: IncomingMessage): Promise<void> {
       await replyText(msg.from, `*📋 Recent activity:*\n${lines.join("\n")}`);
       return;
     }
+    case "social": {
+      const kind = intent.socialKind ?? "other";
+      if (kind === "thanks") {
+        recordTurn(msg.from, { intent: "social", outcome: "thanks-acknowledged" });
+        await replyText(msg.from, socialReplyText("thanks"));
+        return;
+      }
+      if (kind === "greeting") {
+        const clearance = await getClearance(msg.from);
+        const resolved = await resolveDisplayName(msg.from, msg.pushName, clearance.name);
+        recordTurn(msg.from, {
+          intent: "social",
+          clearance: clearance.status,
+          outcome: "greeted",
+        });
+        await replyText(
+          msg.from,
+          `${greet(greetingName(resolved))}\n\nSay the word — buy, send, request, balance, history.`,
+        );
+        return;
+      }
+      recordTurn(msg.from, { intent: "social", outcome: "ack-acknowledged" });
+      await replyText(msg.from, socialReplyText(kind));
+      return;
+    }
     case "unknown":
     default: {
+      // No-model fallback: deterministic thanks read (the model owns
+      // social language whenever a key is configured).
+      if (isThanks(msg.text)) {
+        recordTurn(msg.from, { intent: "thanks", outcome: "acknowledged" });
+        await replyText(msg.from, "*Anytime. 🤝*");
+        return;
+      }
       recordTurn(msg.from, { intent: "unknown" });
       await replyText(msg.from, `*Didn't catch that.*\n\n${HELP}`);
       return;
